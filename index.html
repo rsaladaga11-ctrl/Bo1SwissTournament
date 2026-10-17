@@ -1,0 +1,253 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover"><title>Bo1 Swiss Manager</title>
+<style>
+:root{--bg:#0f1218;--cd:#181d27;--bd:#2a3242;--tx:#eef1f6;--mu:#9aa6ba;--ac:#5b8cff;--ok:#3ecf8e;--bad:#ff6b6b;--wa:#f5b84b;color-scheme:dark;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,Segoe UI,Roboto,sans-serif}
+#nav{display:flex;gap:4px;overflow-x:auto;background:var(--cd);border-bottom:1px solid var(--bd);padding:8px;position:sticky;top:env(safe-area-inset-top,0px);z-index:5}
+#nav button{white-space:nowrap}main{max-width:1100px;margin:0 auto;padding:16px}
+button,select,input,textarea{font:inherit;color:var(--tx);background:#222a38;border:1px solid var(--bd);border-radius:8px;padding:8px 12px}
+button{cursor:pointer}button:hover{border-color:var(--ac)}button.on,button.pri{background:var(--ac);border-color:var(--ac);color:#fff;font-weight:600}button.dg{color:var(--bad)}button:disabled{opacity:.4;cursor:not-allowed}
+.card{background:var(--cd);border:1px solid var(--bd);border-radius:12px;padding:16px;margin-bottom:16px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:12px}.stat b{display:block;font-size:28px}.stat span,.mu{color:var(--mu)}
+.tw{overflow-x:auto}table{width:100%;border-collapse:collapse}th,td{padding:9px 10px;text-align:left;border-bottom:1px solid var(--bd);white-space:nowrap}th{color:var(--mu);font-weight:600;cursor:pointer}
+.bar{height:10px;background:#222a38;border-radius:6px;overflow:hidden}.bar i{display:block;height:100%;background:var(--ok)}
+.w{color:var(--ok)}.l{color:var(--bad)}.b{color:var(--wa)}.tag{padding:2px 8px;border-radius:99px;font-size:12px;border:1px solid var(--bd)}
+.row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px}label{display:block;margin:10px 0 4px;color:var(--mu)}
+#modal{position:fixed;inset:0;background:#000a;display:none;align-items:center;justify-content:center;z-index:9;padding:16px}#modal .card{max-width:640px;width:100%;margin:0}
+textarea{width:100%;min-height:200px;font-family:monospace}h2{margin:0 0 12px}
+.champ{background:linear-gradient(135deg,#3a2f0b,#181d27);border-color:var(--wa);font-size:20px}
+@media print{body{background:#fff;color:#000}#nav,.noprint,button,select{display:none!important}.card{border:0;background:#fff}td,th{color:#000;font-size:26px;border-color:#000}.pr{display:inline}}
+.pr{display:none}
+.tmbar{display:flex;gap:8px;align-items:center;flex-wrap:wrap;justify-content:center;background:var(--cd);border-bottom:1px solid var(--bd);padding:8px}
+.td{font-family:ui-monospace,Menlo,monospace;font-weight:700;font-size:26px;min-width:96px;text-align:center}
+#tmfull{display:none;position:fixed;inset:0;z-index:20;background:var(--bg);flex-direction:column;align-items:center;justify-content:center;gap:24px;padding:16px}
+.big{font-family:ui-monospace,Menlo,monospace;font-weight:800;font-size:min(26vw,32vh);line-height:1}
+.low{color:var(--wa)}.end{color:var(--bad);animation:bl 1s infinite}@keyframes bl{50%{opacity:.3}}
+.gate{max-width:440px;margin:40px auto}.gate input{width:100%}
+@media print{#tm,#tmfull{display:none!important}}
+</style></head><body>
+<div id="nav" class="noprint"></div><div id="tm" class="tmbar noprint"></div><main id="main"></main><div id="tmfull"></div><div id="modal"></div>
+<script>
+const K='bo1swiss';
+const def=()=>({name:'',game:'',tableStart:1,nr:0,override:false,started:false,draws:true,dl:false,minOMW:33.33,tb:['pts','omw','oomw','wins','seed'],players:[],rd:[],preview:null,pid:1,mid:1,tm:{mins:50,left:3000,end:null}});
+let S;try{S=JSON.parse(localStorage.getItem(K))}catch(e){}S=S||def();S.tm=S.tm||{mins:50,left:3000,end:null};
+const save=()=>{try{localStorage.setItem(K,JSON.stringify(S))}catch(e){}};
+const $=s=>document.querySelector(s),esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const pct=x=>(x*100).toFixed(2)+'%',avg=a=>a.length?a.reduce((x,y)=>x+y,0)/a.length:0;
+const calcRounds=n=>n<2?0:Math.ceil(Math.log2(n));
+const tot=()=>S.override||S.started?S.nr:calcRounds(S.players.length);
+const nm=id=>(S.players.find(p=>p.id===id)||{name:'—'}).name;
+const complete=r=>r.matches.every(m=>m.res);
+let tab='Dashboard',sel=null,sk='',sd=1,q='',testRes=null;
+const TABS=['Dashboard','Players','Pairings','Standings','Round History','Settings'];
+const TBN={pts:'Match points',omw:'OMW%',oomw:'OOMW%',wins:'Wins',seed:'Seed'};
+
+function stats(st=S){
+ const m={},mn=st.minOMW/100;
+ st.players.forEach(p=>m[p.id]={p,pts:0,w:0,l:0,d:0,b:0,played:0,opps:[],hist:[]});
+ st.rd.forEach(r=>r.matches.forEach(x=>{
+  const a=m[x.p1],b=x.p2?m[x.p2]:null;
+  a.hist.push({n:r.n,t:x.t,opp:x.p2,res:x.res==='bye'?'BYE':!x.res?'Pending':x.res==='p1'?'Win':x.res==='p2'?'Loss':x.res==='draw'?'Draw':'Loss (DL)'});
+  if(b)b.hist.push({n:r.n,t:x.t,opp:x.p1,res:x.res==='bye'?'':!x.res?'Pending':x.res==='p2'?'Win':x.res==='p1'?'Loss':x.res==='draw'?'Draw':'Loss (DL)'});
+  if(!x.res)return;
+  if(x.res==='bye'){a.pts+=3;a.w++;a.b++;a.played++;return}
+  if(x.res==='p1'){a.pts+=3;a.w++;b.l++}else if(x.res==='p2'){b.pts+=3;b.w++;a.l++}
+  else if(x.res==='draw'){a.pts++;b.pts++;a.d++;b.d++}else{a.l++;b.l++}
+  a.played++;b.played++;a.opps.push(b.p.id);b.opps.push(a.p.id);
+ }));
+ const raw=x=>x.played?x.pts/(3*x.played):0;
+ Object.values(m).forEach(x=>x.omw=avg(x.opps.map(o=>Math.max(mn,raw(m[o])))));
+ Object.values(m).forEach(x=>x.oomw=avg(x.opps.map(o=>m[o].omw)));
+ return m}
+function rank(st=S){
+ const s=stats(st),k={pts:x=>-x.pts,omw:x=>-x.omw,oomw:x=>-x.oomw,wins:x=>-x.w,seed:x=>x.p.seed};
+ const L=Object.values(s),eq=(a,b)=>st.tb.filter(t=>t!=='seed').every(t=>Math.abs(k[t](a)-k[t](b))<1e-9);
+ L.sort((a,b)=>{for(const t of st.tb){const d=k[t](a)-k[t](b);if(Math.abs(d)>1e-9)return d}return a.p.seed-b.p.seed});
+ L.forEach((x,i)=>{x.rank=i+1;x.tied=(i>0&&eq(L[i-1],x))||(i<L.length-1&&eq(x,L[i+1]))});return L}
+
+function pair(st){
+ const s=stats(st);let a=st.players.filter(p=>!p.dropped).map(p=>s[p.id]);
+ for(let i=a.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]]}
+ a.sort((x,y)=>y.pts-x.pts);
+ const run=(l,allow)=>{let n=0;const go=l=>{if(!l.length)return[];if(++n>30000)return null;
+  const x=l[0],rest=l.slice(1);let c=rest.filter(y=>allow||!x.opps.includes(y.p.id));
+  if(allow)c.sort((u,v)=>x.opps.includes(u.p.id)-x.opps.includes(v.p.id));
+  for(const y of c){const r=go(rest.filter(z=>z!==y));if(r)return[[x,y],...r]}return null};return go(l)};
+ let byes=[null];if(a.length%2)byes=[...a].reverse().sort((x,y)=>(x.b>0)-(y.b>0));
+ for(const allow of[false,true])for(const b of byes){const r=run(a.filter(x=>x!==b),allow);
+  if(r)return{ms:r.map(([x,y])=>[x.p.id,y.p.id]),bye:b?b.p.id:null}}
+ return{ms:[],bye:null}}
+function buildRound(st,p){
+ const m=p.ms.map(([a,b],i)=>({id:st.mid++,t:+st.tableStart+i,p1:a,p2:b,res:null}));
+ if(p.bye)m.push({id:st.mid++,t:null,p1:p.bye,p2:null,res:'bye'});return{n:st.rd.length+1,matches:m}}
+function validate(st,r){
+ const act=st.players.filter(p=>!p.dropped).map(p=>p.id),seen={},tb=new Set();
+ for(const m of r.matches){for(const id of[m.p1,m.p2])if(id){if(id===m.p1&&id===m.p2)return'Self pairing';seen[id]=(seen[id]||0)+1}
+  if(m.t!=null){if(tb.has(m.t))return'Duplicate table '+m.t;tb.add(m.t)}}
+ for(const id of act)if(seen[id]!==1)return'Player '+nm(id)+' is not paired exactly once';
+ return Object.keys(seen).length===act.length?'':'Inactive player paired'}
+
+function go(t){tab=t;render()}
+function modal(h){const m=$('#modal');m.innerHTML=`<div class="card">${h}</div>`;m.style.display='flex'}
+function closeM(){$('#modal').style.display='none'}
+let cb=null;function ask(msg,f){cb=f;modal(`<p>${esc(msg)}</p><div class="row"><button class="pri" onclick="closeM();cb()">Confirm</button><button onclick="closeM();render()">Cancel</button></div>`)}
+function show(title,text){modal(`<h2>${esc(title)}</h2><textarea id="ex" readonly>${esc(text)}</textarea><div class="row"><button class="pri" onclick="$('#ex').select();document.execCommand('copy')">Copy</button><button onclick="closeM()">Close</button></div>`)}
+const csv=rows=>rows.map(r=>r.map(c=>`"${String(c??'').replace(/"/g,'""')}"`).join(',')).join('\n');
+const resTxt=(m)=>m.res==='bye'?'BYE':!m.res?'Pending':m.res==='p1'?nm(m.p1)+' wins':m.res==='p2'?nm(m.p2)+' wins':m.res==='draw'?'Draw':'Double loss';
+const roundCsv=r=>csv([['Round','Table','Player 1','Player 2','Result'],...r.matches.map(m=>[r.n,m.t??'',nm(m.p1),m.p2?nm(m.p2):'BYE',resTxt(m)])]);
+const standCsv=()=>csv([['Rank','Player','Points','Wins','Losses','Draws','Byes','OMW%','OOMW%','Status'],...rank().map(x=>[x.rank,x.p.name,x.pts,x.w,x.l,x.d,x.b,pct(x.omw),pct(x.oomw),status(x)])]);
+const status=x=>x.p.dropped?'Dropped':finished()?'Finished':'Active';
+const finished=()=>S.started&&S.rd.length>=tot()&&complete(S.rd[S.rd.length-1]);
+
+function genPreview(){const p=pair(S);S.preview={n:S.rd.length+1,...p};tab='Pairings';render()}
+function confirmPreview(){
+ if(!S.preview||S.preview.n!==S.rd.length+1)return alert2('Preview is stale; regenerate.');
+ const r=buildRound(S,S.preview),e=validate(S,r);if(e)return alert2(e);
+ if(!S.started){S.nr=tot();S.started=true}S.rd.push(r);S.preview=null;S.tm.left=S.tm.mins*60;S.tm.end=Date.now()+S.tm.left*1000;render()}
+function alert2(m){modal(`<p>${esc(m)}</p><button onclick="closeM()">OK</button>`)}
+function setRes(rn,id,v){
+ const m=S.rd[rn-1].matches.find(x=>x.id===id),val=v||null,ap=()=>{m.res=val;render()};
+ if(m.res&&m.res!==val)ask(`Overwrite the existing result for table ${m.t}?`,ap);else ap()}
+function canNext(){const c=S.rd.length;return !S.preview&&S.players.filter(p=>!p.dropped).length>=2&&(c===0||(c<tot()&&complete(S.rd[c-1])))}
+function mTable(r){
+ const s=stats(),rec=id=>{const x=s[id];return `${x.w}–${x.l}${x.d?'–'+x.d:''}`};
+ return `<div class="tw"><table><tr><th>Table</th><th>Player 1</th><th>Player 2</th><th>Status</th><th>Result</th></tr>${r.matches.map(m=>{
+  const bye=m.res==='bye',st=bye?'<span class="tag b">Bye</span>':m.res?'<span class="tag w">Reported</span>':'<span class="tag">Pending</span>';
+  const sel=bye?'<b class="b">BYE · win</b>':`<select onchange="setRes(${r.n},${m.id},this.value)"><option value="">Pending</option><option value="p1" ${m.res==='p1'?'selected':''}>${esc(nm(m.p1))} wins</option><option value="p2" ${m.res==='p2'?'selected':''}>${esc(nm(m.p2))} wins</option>${S.draws?`<option value="draw" ${m.res==='draw'?'selected':''}>Draw</option>`:''}${S.dl?`<option value="dl" ${m.res==='dl'?'selected':''}>Double loss / no-show</option>`:''}</select>`;
+  return `<tr><td><b>${m.t??'—'}</b></td><td class="${m.res==='p1'?'w':m.res==='p2'?'l':''}">${esc(nm(m.p1))} <span class="mu">(${rec(m.p1)})</span></td><td class="${m.res==='p2'?'w':m.res==='p1'?'l':''}">${m.p2?esc(nm(m.p2))+' <span class="mu">('+rec(m.p2)+')</span>':'—'}</td><td>${st}</td><td>${sel}</td></tr>`}).join('')}</table></div>`}
+
+const V={
+Dashboard(){
+ const L=rank(),T=tot(),c=S.rd.length,all=S.rd.flatMap(r=>r.matches).filter(m=>m.p2),done=all.filter(m=>m.res).length;
+ const und=L.filter(x=>!x.p.dropped&&x.l===0&&x.played>0).length;
+ let pr=T?S.rd.filter(complete).length:0;const last=S.rd[c-1];
+ if(last&&!complete(last))pr+=last.matches.filter(m=>m.res).length/last.matches.length;
+ const P=T?Math.round(100*pr/T):0;
+ const act=canNext()?`<button class="pri" onclick="genPreview()">${c?`Generate round ${c+1}`:'Generate first round'}</button>`:S.preview?`<button class="pri" onclick="go('Pairings')">Review round ${S.preview.n} preview</button>`:`<button disabled>${finished()?'Tournament complete':c?'Report all results to continue':'Add at least 2 players'}</button>`;
+ return `${finished()&&L[0]?`<div class="card champ">🏆 Champion: <b>${esc(L[0].p.name)}</b></div>`:''}
+ <div class="card"><h2>${esc(S.name||'Untitled tournament')} <span class="mu">${esc(S.game)}</span></h2><div class="grid">
+ <div class="stat"><b>${S.players.length}</b><span>Players</span></div><div class="stat"><b>${c}/${T}</b><span>Round</span></div>
+ <div class="stat"><b>${done}</b><span>Completed matches</span></div><div class="stat"><b>${all.length-done}</b><span>Unreported</span></div>
+ <div class="stat"><b>${und}</b><span>Undefeated</span></div></div>
+ <p class="mu">Progress ${P}%</p><div class="bar"><i style="width:${P}%"></i></div><div class="row" style="margin-top:16px">${act}</div></div>`},
+Players(){
+ const n=S.players.length,lock=S.started;
+ return `${regPanel()}<div class="card"><h2>Players (${n})</h2>${lock?'<p class="mu">Registration is locked once the tournament starts. You can still drop players.</p>':`<div class="row"><input id="pn" placeholder="Player or team name" onkeydown="if(event.key==='Enter')addP()"><button class="pri" onclick="addP()">Add</button><input type="file" accept=".csv,.txt" onchange="impF(this)"></div><textarea placeholder="Or paste CSV / one name per line (first column is used)" id="pc" style="min-height:80px"></textarea><div class="row"><button onclick="impT($('#pc').value)">Import pasted list</button></div>`}
+ <div class="tw"><table><tr><th>Seed</th><th>Name</th><th>Status</th><th></th></tr>${S.players.map(p=>`<tr><td>${p.seed}</td><td>${esc(p.name)}</td><td>${p.dropped?'<span class="tag l">Dropped</span>':'<span class="tag w">Active</span>'}</td><td><button onclick="drop(${p.id})">${p.dropped?'Reinstate':'Drop'}</button> ${lock?'':`<button class="dg" onclick="rm(${p.id})">Remove</button>`}</td></tr>`).join('')}</table></div></div>`},
+Pairings(){
+ const c=S.rd.length,T=tot();let h='';
+ if(S.preview){const p=S.preview,r=buildRound({...S,mid:-1,rd:S.rd},p);
+  h=`<div class="card"><h2>Round ${p.n} preview</h2><p class="mu">Not saved yet. Review, then confirm.</p>${mTable({n:0,matches:r.matches.map(m=>({...m}))}).replace(/<select.*?<\/select>/g,'—')}<div class="row"><button class="pri" onclick="confirmPreview()">Confirm pairings</button><button onclick="genPreview()">Regenerate</button><button onclick="S.preview=null;render()">Discard</button></div></div>`}
+ else if(c){const r=S.rd[c-1];h=`<div class="card"><h2>Round ${r.n} of ${T}</h2><p class="pr">Round ${r.n}</p><div class="row noprint"><button onclick="window.print()">Print</button><button onclick="show('Round ${r.n} pairings',roundCsv(S.rd[${c-1}]))">Export CSV</button>${canNext()?`<button class="pri" onclick="genPreview()">Generate round ${c+1}</button>`:''}</div>${mTable(r)}<p class="mu noprint">${r.matches.filter(m=>!m.res).length} pending</p></div>`}
+ else h=`<div class="card"><p>No rounds yet.</p>${canNext()?'<button class="pri" onclick="genPreview()">Generate first round</button>':'<p class="mu">Add at least 2 players.</p>'}</div>`;
+ return h},
+Standings(){
+ const G={rank:x=>x.rank,name:x=>x.p.name.toLowerCase(),pts:x=>x.pts,w:x=>x.w,l:x=>x.l,d:x=>x.d,b:x=>x.b,omw:x=>x.omw,oomw:x=>x.oomw};
+ let R=rank().filter(x=>x.p.name.toLowerCase().includes(q.toLowerCase()));
+ if(sk)R=[...R].sort((a,b)=>{const u=G[sk](a),v=G[sk](b);return(u>v?1:u<v?-1:0)*sd});
+ const H=[['rank','Rank'],['name','Player'],['pts','Pts'],['w','W'],['l','L'],['d','D'],['b','Byes'],['omw','OMW%'],['oomw','OOMW%']];
+ return `<div class="card"><h2>Standings</h2><div class="row noprint"><input id="sq" placeholder="Search player" value="${esc(q)}" oninput="q=this.value;render();const e=$('#sq');e.focus();e.setSelectionRange(99,99)"><button onclick="window.print()">Print</button><button onclick="show('Standings CSV',standCsv())">Export CSV</button><button onclick="show('Tournament report',report())">Full report</button></div>
+ <div class="tw"><table><tr>${H.map(h=>`<th onclick="sk='${h[0]}';sd=sk==='${h[0]}'&&this.dataset.s?-sd:1;srt('${h[0]}')">${h[1]}</th>`).join('')}<th>Status</th></tr>${R.map(x=>`<tr onclick="sel=${x.p.id};render()" style="cursor:pointer"><td>${x.rank}${x.tied?' <span title="Tied on all applicable tiebreakers" class="b">≈</span>':''}</td><td>${esc(x.p.name)}</td><td><b>${x.pts}</b></td><td class="w">${x.w}</td><td class="l">${x.l}</td><td>${x.d}</td><td class="b">${x.b}</td><td>${pct(x.omw)}</td><td>${pct(x.oomw)}</td><td>${status(x)}</td></tr>`).join('')}</table></div><p class="mu noprint">≈ = tied on every applicable tiebreaker. Click a row for the player profile.</p></div>${prof()}`},
+'Round History'(){return S.rd.length?[...S.rd].reverse().map(r=>`<div class="card"><h2>Round ${r.n}</h2><div class="row noprint"><button onclick="window.print()">Print</button><button onclick="show('Round ${r.n} pairings',roundCsv(S.rd[${r.n-1}]))">Export CSV</button></div>${mTable(r)}<p class="mu noprint">Select “Pending” to reopen a match. Changes recalculate standings automatically.</p></div>`).join(''):'<div class="card">No rounds played yet.</div>'},
+Settings(){
+ const lock=S.started;
+ return `<div class="card"><h2>Tournament settings</h2>
+ <label>Tournament name</label><input value="${esc(S.name)}" onchange="S.name=this.value;render()">
+ <label>Game / competition</label><input value="${esc(S.game)}" onchange="S.game=this.value;render()">
+ <label>Starting table number</label><input type="number" min="1" value="${S.tableStart}" ${lock?'disabled':''} onchange="S.tableStart=Math.max(1,+this.value||1);render()">
+ <label>Swiss rounds (recommended ${calcRounds(S.players.length)}; ${lock?'locked':'override allowed'})</label><input type="number" min="1" value="${tot()}" onchange="setNr(+this.value)">
+ <label>Match format</label><input value="Best of 1 (Bo1)" disabled>
+ <label>Minimum opponent match-win % (OMW floor)</label><input type="number" step="0.01" value="${S.minOMW}" onchange="S.minOMW=Math.min(100,Math.max(0,+this.value));render()">
+ <label><input type="checkbox" ${S.draws?'checked':''} onchange="S.draws=this.checked;render()"> Allow draws</label>
+ <label><input type="checkbox" ${S.dl?'checked':''} onchange="S.dl=this.checked;render()"> Allow double loss / no-show</label>
+ <label>Tiebreaker order (final fallback is seed)</label>${S.tb.map((t,i)=>`<div class="row"><span>${i+1}. ${TBN[t]}</span>${i?`<button onclick="mv(${i})">↑</button>`:''}</div>`).join('')}</div>
+ <div class="card"><h2>Admin account</h2><p class="mu">Default login is admin / admin. Change it here (stored in this browser).</p><div class="row"><input id="nu" placeholder="New username" value="${esc(S.cred?S.cred.u:'admin')}" style="max-width:200px"><input id="np" type="password" placeholder="New password" style="max-width:200px"><button onclick="setCred()">Save</button><button onclick="logout()">Log out</button></div></div><div class="card"><div class="row"><button onclick="runTests()">Run tests</button><button class="dg" onclick="ask('Delete ALL tournament data?',()=>{const c=S.cred;S=def();S.cred=c;render()})">Reset tournament</button></div>${testRes?testRes.map(r=>`<div class="${r[1]?'w':'l'}">${r[1]?'✓':'✗'} ${esc(r[0])}</div>`).join(''):''}</div>`}
+};
+function srt(k){render()}
+function prof(){
+ if(!sel)return'';const x=stats()[sel];if(!x)return'';const r=rank().find(y=>y.p.id===sel);
+ return `<div class="card"><h2>${esc(x.p.name)} <button onclick="sel=null;render()">Close</button></h2><div class="grid"><div class="stat"><b>#${r.rank}</b><span>Rank</span></div><div class="stat"><b>${x.w}–${x.l}${x.d?'–'+x.d:''}</b><span>Record</span></div><div class="stat"><b>${x.pts}</b><span>Match points</span></div><div class="stat"><b>${pct(x.omw)}</b><span>OMW%</span></div><div class="stat"><b>${pct(x.oomw)}</b><span>OOMW%</span></div><div class="stat"><b>${status(r)}</b><span>Status</span></div></div>
+ <div class="tw"><table><tr><th>Round</th><th>Table</th><th>Opponent</th><th>Result</th></tr>${x.hist.map(h=>`<tr><td>${h.n}</td><td>${h.t??'—'}</td><td>${h.opp?esc(nm(h.opp)):'BYE'}</td><td class="${h.res==='Win'||h.res==='BYE'?'w':h.res.startsWith('Loss')?'l':''}">${h.res||'BYE'}</td></tr>`).join('')}</table></div><p class="mu">Byes: ${x.b}</p></div>`}
+function report(){const s=`${S.name} — ${S.game}\nPlayers: ${S.players.length}, Rounds: ${S.rd.length}/${tot()}\n\nSTANDINGS\n${standCsv()}\n`;return s+S.rd.map(r=>`\nROUND ${r.n}\n${roundCsv(r)}`).join('\n')}
+function addP(){const i=$('#pn');addNames([i.value]);}
+function addNames(a){if(S.started)return;a.forEach(n=>{n=n.trim();if(!n||/^(name|player|team)$/i.test(n))return;if(S.players.some(p=>p.name.toLowerCase()===n.toLowerCase()))return;S.players.push({id:S.pid++,name:n,seed:S.players.length+1,dropped:false})});render()}
+function impT(t){addNames(t.split(/\r?\n/).map(l=>l.split(',')[0].replace(/^"|"$/g,'')))}
+function impF(i){const f=i.files[0];if(!f)return;const r=new FileReader();r.onload=()=>impT(r.result);r.readAsText(f)}
+function drop(id){const p=S.players.find(p=>p.id===id);p.dropped=!p.dropped;render()}
+function rm(id){S.players=S.players.filter(p=>p.id!==id);S.players.forEach((p,i)=>p.seed=i+1);render()}
+function setNr(v){v=Math.max(1,v|0);const ap=()=>{S.nr=v;S.override=true;render()};S.started?ask('Change the round count after the tournament has started?',ap):ap()}
+function mv(i){[S.tb[i-1],S.tb[i]]=[S.tb[i],S.tb[i-1]];render()}
+function runTests(){
+ const R=[],t=(n,c)=>R.push([n,!!c]);
+ [[4,2],[8,3],[16,4],[32,5],[64,6],[128,7]].forEach(([n,e])=>t(`rounds(${n}) = ${e}`,calcRounds(n)===e));
+ const mk=n=>{const s=def();for(let i=1;i<=n;i++)s.players.push({id:i,name:'P'+i,seed:i,dropped:false});return s};
+ const add=(s,ms)=>s.rd.push({n:s.rd.length+1,matches:ms.map((m,i)=>({id:i+1,t:i+1,p1:m[0],p2:m[1],res:m[2]}))});
+ let s=mk(3);add(s,[[1,2,'p1'],[3,null,'bye']]);let x=stats(s);
+ t('Win = 3 pts, loss = 0',x[1].pts===3&&x[2].pts===0);
+ t('Bye = 3 pts + win, not an opponent',x[3].pts===3&&x[3].w===1&&x[3].opps.length===0);
+ t('OMW uses 33.33% floor',Math.abs(x[1].omw-1/3)<1e-3);
+ s=mk(4);add(s,[[1,2,'p1'],[3,4,'p1']]);add(s,[[1,3,'p1'],[2,4,'p1']]);add(s,[[1,4,'draw']].concat([]));x=stats(s);
+ t('Draw = 1 pt each',x[4].d===1);
+ s=mk(4);add(s,[[1,2,'p1'],[3,4,'p1']]);add(s,[[1,3,'p1'],[2,4,'p1']]);x=stats(s);
+ t('OMW%: P2 = 66.67%',Math.abs(x[2].omw-2/3)<1e-3);
+ t('OOMW%: P1 = 66.67%',Math.abs(x[1].oomw-2/3)<1e-3);
+ t('No matches: no divide-by-zero',stats(mk(2))[1].omw===0);
+ [8,9,13,16].forEach(n=>{const s=mk(n);let ok=true,rep=false,bye={},seen=new Set();
+  for(let r=0;r<calcRounds(n);r++){const p=pair(s),rd=buildRound(s,p);if(validate(s,rd))ok=false;
+   rd.matches.forEach(m=>{if(m.p2){const k=[m.p1,m.p2].sort()+'';if(seen.has(k))rep=true;seen.add(k);m.res=Math.random()<.5?'p1':'p2'}else bye[m.p1]=(bye[m.p1]||0)+1});s.rd.push(rd)}
+  t(`${n} players: every player paired once per round`,ok);t(`${n} players: no repeat opponents`,!rep);t(`${n} players: max one bye each`,Object.values(bye).every(v=>v<=1))});
+ testRes=R;render()}
+const tleft=()=>S.tm.end?Math.max(0,Math.round((S.tm.end-Date.now())/1000)):S.tm.left;
+const fmt=s=>{const h=Math.floor(s/3600),m=Math.floor(s%3600/60),p=n=>String(n).padStart(2,'0');return(h?h+':'+p(m):p(m))+':'+p(s%60)};
+let tmFull=false;
+function tStart(){if(!S.tm.end){if(S.tm.left<=0)S.tm.left=S.tm.mins*60;S.tm.end=Date.now()+S.tm.left*1000}save();renderTm()}
+function tPause(){if(S.tm.end){S.tm.left=tleft();S.tm.end=null}save();renderTm()}
+function tReset(){S.tm.end=null;S.tm.left=S.tm.mins*60;save();renderTm()}
+function tSet(v){const was=!!S.tm.end;S.tm.mins=Math.max(1,Math.min(600,Math.round(+v)||50));tReset();if(was)tStart()}
+function tFull(f){tmFull=f;renderTm();try{if(f){const e=$('#tmfull');e.requestFullscreen&&e.requestFullscreen().catch(()=>{})}else if(document.fullscreenElement)document.exitFullscreen()}catch(e){}}
+function renderTm(){
+ const run=!!S.tm.end,d=fmt(tleft()),ctl=`<button class="pri" onclick="${run?'tPause()':'tStart()'}">${run?'Pause':'Start'}</button><button onclick="tReset()">Reset</button>`,inp=`<input type="number" min="1" max="600" value="${S.tm.mins}" onchange="tSet(this.value)" style="width:80px" title="Round time in minutes"><span class="mu">min</span>`;
+ $('#tm').innerHTML=`<span>⏱</span><b class="td" id="tmd">${d}</b>${ctl}${inp}<button onclick="tFull(true)">⛶ Maximize</button>`;
+ const f=$('#tmfull');f.style.display=tmFull?'flex':'none';
+ if(tmFull)f.innerHTML=`<div class="mu" style="font-size:24px">${S.rd.length?'Round '+S.rd.length:'Round timer'}</div><div class="big" id="tmb">${d}</div><div class="row">${ctl}${inp}<button onclick="tFull(false)">Close</button></div>`;
+ tick()}
+function tick(){
+ let l=tleft();
+ if(S.tm.end&&l<=0){S.tm.end=null;S.tm.left=0;save();try{const c=new(window.AudioContext||window.webkitAudioContext)(),o=c.createOscillator();o.connect(c.destination);o.frequency.value=880;o.start();setTimeout(()=>o.stop(),900)}catch(e){}renderTm();return}
+ document.querySelectorAll('#tmd,#tmb').forEach(e=>{e.textContent=fmt(l);e.classList.toggle('end',l<=0);e.classList.toggle('low',l>0&&l<=60&&!!S.tm.end)})}
+setInterval(tick,1000);
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&tmFull)tFull(false)});
+document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&tmFull){tmFull=false;renderTm()}});
+let AUTH=false,PREV=false,regMsg='',lerr='';
+const route=()=>PREV||location.hash==='#register'?'reg':'app';
+const gateOK=()=>route()==='app'&&AUTH;
+async function sha(t){try{const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(t));return[...new Uint8Array(b)].map(x=>x.toString(16).padStart(2,'0')).join('')}catch(e){let h=5381;for(const c of t)h=(h*33^c.charCodeAt(0))>>>0;return'f'+h}}
+async function login(){
+ const u=$('#lu').value.trim(),p=$('#lp').value,c=S.cred||{u:'admin',h:await sha('admin')};
+ if(u===c.u&&await sha(p)===c.h){AUTH=true;lerr=''}else lerr='Incorrect username or password';render()}
+async function setCred(){const u=$('#nu').value.trim(),p=$('#np').value;if(!u||!p)return alert2('Enter a username and a password.');S.cred={u,h:await sha(p)};render();alert2('Login details updated.')}
+function logout(){AUTH=false;PREV=false;render()}
+function regGo(){
+ const n=$('#rn').value.trim().slice(0,40);
+ if(S.started)regMsg='Registration is closed.';
+ else if(!n)regMsg='Enter a name.';
+ else if(S.regs.some(r=>r.name.toLowerCase()===n.toLowerCase()))regMsg='That name is already registered.';
+ else{S.regs.push({id:Date.now()+'-'+Math.random().toString(36).slice(2,6),name:n,ts:Date.now()});regMsg='\u2713 Registered! You are on the list, '+n+'.'}
+ render()}
+function delReg(id){S.regs=S.regs.filter(r=>r.id!==id);render()}
+function regView(){
+ return `<div class="card gate"><h2>${esc(S.name||'Tournament')} registration</h2>${S.game?`<p class="mu">${esc(S.game)}</p>`:''}${S.started?'<p class="l">Registration is closed.</p>':`<label>Player or team name</label><input id="rn" maxlength="40" onkeydown="if(event.key==='Enter')regGo()"><div class="row" style="margin-top:12px"><button class="pri" onclick="regGo()">Register</button></div>`}<p class="${regMsg.startsWith('\u2713')?'w':'l'}">${esc(regMsg)}</p><div class="row"><button onclick="PREV=false;location.hash='';regMsg='';render()">${AUTH?'\u2190 Back to admin':'Admin login'}</button></div></div>`}
+function gateView(){
+ if(route()==='reg')return regView();
+ return `<div class="card gate"><h2>Admin login</h2><label>Username</label><input id="lu" autocomplete="username" onkeydown="if(event.key==='Enter')$('#lp').focus()"><label>Password</label><input id="lp" type="password" autocomplete="current-password" onkeydown="if(event.key==='Enter')login()"><div class="row" style="margin-top:12px"><button class="pri" onclick="login()">Log in</button><button onclick="PREV=true;render()">Player registration</button></div><p class="l">${esc(lerr)}</p>${S.cred?'':'<p class="mu">Default login: admin / admin. Change it in Settings.</p>'}</div>`}
+function regPanel(){
+ const have=n=>S.players.some(p=>p.name.toLowerCase()===n.toLowerCase()),open=S.regs.filter(r=>!have(r.name));
+ return `<div class="card"><h2>Registrations (${S.regs.length})</h2><p class="mu">Players sign up on the registration page of this app, on this device and browser. Add them to the tournament here.</p><div class="row"><button onclick="PREV=true;render()">Open registration page</button>${S.started?'':`<button class="pri" ${open.length?'':'disabled'} onclick="addNames(S.regs.map(r=>r.name))">Add all (${open.length})</button>`}</div>${S.regs.length?`<div class="tw"><table>${S.regs.map(r=>`<tr><td>${esc(r.name)}</td><td>${have(r.name)?'<span class="tag w">Added</span>':S.started?'<span class="tag">Locked</span>':`<button data-n="${esc(r.name)}" onclick="addNames([this.dataset.n])">Add</button>`}</td><td><button class="dg" data-id="${esc(r.id)}" onclick="delReg(this.dataset.id)">Delete</button></td></tr>`).join('')}</table></div>`:''}</div>`}
+function render(){
+ S.regs=S.regs||[];
+ if(!gateOK()){$('#nav').style.display='none';$('#tm').style.display='none';$('#main').innerHTML=gateView();return}
+ $('#nav').style.display='';$('#tm').style.display='';
+ $('#nav').innerHTML=TABS.map(t=>`<button class="${t===tab?'on':''}" onclick="go('${t}')">${t}</button>`).join('');
+ $('#main').innerHTML=V[tab]();save();renderTm()}
+render();addEventListener('hashchange',render);
+</script></body></html>
